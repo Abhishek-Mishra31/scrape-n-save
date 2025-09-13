@@ -17,7 +17,7 @@ COPY . .
 RUN npm run build
 
 # Production stage
-FROM node:18-bullseye-slim AS production
+FROM node:20-bullseye-slim AS production
 
 # Install dependencies for Puppeteer and Chrome
 RUN apt-get update \
