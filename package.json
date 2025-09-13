@@ -9,8 +9,7 @@
   "scripts": {
     "start": "node server.js",
     "build": "tsc",
-    "dev": "nodemon --exec ts-node server.ts",
-    "postinstall": "npm run build"
+    "dev": "nodemon --exec ts-node server.ts"
   },
   "devDependencies": {
     "@types/cheerio": "^0.22.35",

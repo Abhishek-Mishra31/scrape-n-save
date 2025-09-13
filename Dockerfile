@@ -1,5 +1,23 @@
-# Use official Node.js runtime as base image
-FROM node:18-bullseye-slim
+# Build stage
+FROM node:18-bullseye-slim AS builder
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+COPY tsconfig.json ./
+
+# Install all dependencies (including dev dependencies)
+RUN npm ci
+
+# Copy source code
+COPY . .
+
+# Build TypeScript
+RUN npm run build
+
+# Production stage
+FROM node:18-bullseye-slim AS production
 
 # Install dependencies for Puppeteer and Chrome
 RUN apt-get update \
@@ -17,14 +35,12 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm ci --only=production
+# Install only production dependencies
+RUN npm ci --only=production && npm cache clean --force
 
-# Copy source code
-COPY . .
-
-# Build TypeScript
-RUN npm run build
+# Copy built application from builder stage
+COPY --from=builder /app/*.js ./
+COPY --from=builder /app/linkedinLogin.js ./
 
 # Create non-root user
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
@@ -34,6 +50,7 @@ RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
 
 # Set environment variables
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
+ENV NODE_ENV=production
 
 # Switch to non-root user
 USER pptruser
