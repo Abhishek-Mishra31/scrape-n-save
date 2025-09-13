@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: linkedin-scraper
+    name: linkedin-scraper-save
     env: node
     plan: starter
     buildCommand: npm install && npm run build
