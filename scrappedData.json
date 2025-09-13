@@ -1,0 +1,88 @@
+{
+  "fullName": "Abhishek Mishra",
+  "firstName": "Abhishek",
+  "lastName": "Mishra",
+  "source": "LinkedIn",
+  "city": "Gaya",
+  "state": "Bihar",
+  "gender": "Male",
+  "country": "India",
+  "linkedinUrl": "https://www.linkedin.com/in/abhishek-mishra-192006209/",
+  "workedPreviously": "yes",
+  "degree": "Master of Computer Applications - MCA",
+  "workExperiences": [
+    {
+      "jobTitle": "Full-stack Developer",
+      "companyName": "applyGOAT",
+      "startDate": "",
+      "endDate": "",
+      "skills": [],
+      "stillWorking": true,
+      "description": "I’m currently working as a Full Stack Developer at ApplyGoat, where I build and optimize plugins. Alongside development, I’m also familiar with writing automation scripts to streamline workflows and improve efficiency.I’m currently working as a Full Stack Developer at ApplyGoat, where I build and optimize plugins. Alongside development, I’m also familiar with writing automation scripts to streamline workflows and improve efficiency.",
+      "location": "RemoteRemote",
+      "workType": "Self-employedapplyGOAT"
+    },
+    {
+      "jobTitle": "Full Stack Developer",
+      "companyName": "OctaNet Services Pvt Ltd.",
+      "startDate": "",
+      "endDate": "",
+      "skills": [],
+      "stillWorking": false,
+      "description": "A Full Stack Web - Developer in a versatile professional with expertise in both front-end and back-end technologies, capable of handling diverse aspects of web application. development.A Full Stack Web - Developer in a versatile professional with expertise in both front-end and back-end technologies, capable of handling diverse aspects of web application. development.",
+      "location": "RemoteRemote",
+      "workType": "InternshipOctaNet Services Pvt Ltd."
+    }
+  ],
+  "projectExperiences": [
+    {
+      "projectName": "Password_Manager",
+      "startDate": "Feb 2024",
+      "endDate": "",
+      "skills": [],
+      "stillWorking": true,
+      "description": "A platform which holds your username and passwords for different social media stuffs |A platform which holds your username and passwords for different social media stuffs |\n\n    \n\n        Screenshot 2024-04-01 140847.pngScreenshot 2024-04-01 140847.png",
+      "gitUrl": "",
+      "hostUrl": ""
+    },
+    {
+      "projectName": "SocialAuth_API",
+      "startDate": "Feb 2025",
+      "endDate": "Feb 2025",
+      "skills": [],
+      "stillWorking": false,
+      "description": "This project is a backend implementation of social authentication using OAuth. It allows users to log in via third-party providers such as Google, LinkedIn etc. Built with Node.js, Bcrypt.js, JWT , Passport.js it ensures secure authentication and easy integration with frontend applications.This project is a backend implementation of social authentication using OAuth. It allows users to log in via third-party providers such as Google, LinkedIn etc. Built with Node.js, Bcrypt.js, JWT , Passport.js it ensures secure authentication and easy integration with frontend applications.",
+      "gitUrl": "",
+      "hostUrl": ""
+    }
+  ],
+  "educationExperiences": [
+    {
+      "courseName": "Master of Computer Applications - MCA",
+      "field": "Computer Software EngineeringMaster of Computer Applications - MCA",
+      "collegeName": "CHANDIGARH UNIVERSITY",
+      "startDate": "Aug 2024",
+      "endDate": "Jun 2026",
+      "skills": [],
+      "stillStudying": false,
+      "description": "Master of Computer Applications - MCA, Computer Software EngineeringMaster of Computer Applications - MCA, Computer Software Engineering",
+      "grade": "",
+      "location": "Gaya, Bihar, India",
+      "educationType": "Master of Computer Applications - MCA"
+    },
+    {
+      "courseName": "BCA",
+      "field": "Computer Software and Media ApplicationsBCA",
+      "collegeName": "Gaya College, Gaya",
+      "startDate": "Mar 2020",
+      "endDate": "Mar 2023",
+      "skills": [],
+      "stillStudying": false,
+      "description": "BCA, Computer Software and Media ApplicationsBCA, Computer Software and Media Applications",
+      "grade": "",
+      "location": "Gaya, Bihar, India",
+      "educationType": "BCA"
+    }
+  ],
+  "scrapedAt": "2025-09-13T14:13:03.508Z"
+}
