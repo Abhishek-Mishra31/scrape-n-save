@@ -31,7 +31,7 @@ interface LinkedInProfile {
 }
 
 const app = express();
-const PORT: number = Number(process.env.PORT);
+const PORT: number = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 app.use(cors());
@@ -86,12 +86,19 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         console.log("Launching Puppeteer...");
         browser = await puppeteer.launch({
             headless: true,
-            executablePath: puppeteer.executablePath(),
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
             args: [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-features=TranslateUI",
+                "--disable-web-security",
+                "--no-first-run",
+                "--no-default-browser-check",
             ],
         });
 

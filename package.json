@@ -1,4 +1,17 @@
 {
+  "name": "linkedin-scraper",
+  "version": "1.0.0",
+  "description": "LinkedIn Profile Scraping API",
+  "main": "server.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "build": "tsc",
+    "dev": "nodemon --exec ts-node server.ts",
+    "postinstall": "npm run build"
+  },
   "devDependencies": {
     "@types/cheerio": "^0.22.35",
     "@types/cors": "^2.8.19",

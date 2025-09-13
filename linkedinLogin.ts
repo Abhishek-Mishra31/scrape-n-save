@@ -18,7 +18,17 @@ export async function loginAndGetSessionCookie(): Promise<Protocol.Network.Cooki
     const browser: Browser = await puppeteer.launch({
         headless: true, // Use true for production, false for debugging
         defaultViewport: null,
-        args: ["--no-sandbox", "--disable-setuid-sandbox"],
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || undefined,
+        args: [
+            "--no-sandbox", 
+            "--disable-setuid-sandbox",
+            "--disable-dev-shm-usage",
+            "--disable-background-timer-throttling",
+            "--disable-backgrounding-occluded-windows",
+            "--disable-renderer-backgrounding",
+            "--no-first-run",
+            "--no-default-browser-check"
+        ],
     });
 
     const page: Page = await browser.newPage();
