@@ -136,7 +136,7 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         await ensureCookies(page);
 
         console.log("Navigating to LinkedIn profile...");
-        await page.goto(profileUrl, { waitUntil: 'domcontentloaded'});
+        await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: Number(process.env.NAV_TIMEOUT_MS) || 90000 });
         console.log("Navigation successful.");
 
         // Quick wait for profile name; don't fail if not found fast
