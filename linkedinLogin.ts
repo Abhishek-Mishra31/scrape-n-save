@@ -42,6 +42,7 @@ export async function loginAndGetSessionCookie(): Promise<Protocol.Network.Cooki
         console.log("Submitting login form...");
         await page.click("button[type=submit]");
 
+        
         // Wait for navigation and the session cookie to be set.
         // Poll for the cookie for up to 60 seconds.
         let liAtCookie: Protocol.Network.Cookie | undefined;

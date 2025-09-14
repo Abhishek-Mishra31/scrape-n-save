@@ -21,6 +21,7 @@ async function getBrowser(): Promise<Browser> {
         browserPromise = puppeteer.launch({
             headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
+            protocolTimeout: 180000, // 3 minutes for protocol timeout
             args: [
                 "--no-sandbox",
                 "--disable-setuid-sandbox", 
@@ -59,7 +60,10 @@ const PORT: number = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 app.use(cors());
-puppeteer.use(StealthPlugin());
+// Only use stealth plugin locally (causes protocol timeouts on constrained servers)
+if (process.env.NODE_ENV !== 'production') {
+    puppeteer.use(StealthPlugin());
+}
 
 /**
  * Loads cookies from a JSON file or logs in to generate them,
@@ -139,8 +143,8 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
             }
         });
         
-        page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 90000);
-        page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 90000);
+        page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 60000);
+        page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 60000);
 
         await ensureCookies(page);
 
@@ -167,10 +171,26 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
             console.warn('Name selector not found within timeout, continuing anyway');
         }
 
+        console.log("Extracting page content...");
         const pageContent = await page.content();
+        
+        // Quick validation - if page is mostly empty, return early
+        if (pageContent.length < 10000) {
+            console.warn('Page content seems too short, might not have loaded properly');
+            return res.json({
+                fullName: '',
+                firstName: '',
+                lastName: '',
+                source: 'LinkedIn',
+                message: 'Page content insufficient - try again',
+                linkedinUrl: profileUrl,
+                scrapedAt: new Date().toISOString()
+            });
+        }
+        
+        console.log("Loading content into cheerio...");
         const $ = cheerio.load(pageContent);
-
-        console.log("Scraping data...");
+        console.log("Starting data extraction...");
 
         const name: string = $("h1, div[class*='profile-topcard-person-entity__name']").first().text().trim();
         const imageUrl: string | undefined = $("div.pv-top-card--photo img").attr("src");
