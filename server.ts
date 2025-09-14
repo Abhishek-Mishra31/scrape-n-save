@@ -85,7 +85,7 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
     try {
         console.log("Launching Puppeteer...");
         browser = await puppeteer.launch({
-            headless: false,
+            headless: true,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
             args: [
                 "--no-sandbox",
