@@ -121,7 +121,7 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         console.log("Cookies loaded successfully.");
 
         console.log("Navigating to LinkedIn profile...");
-        await page.goto(profileUrl, { waitUntil: 'networkidle2', timeout: Number(process.env.NAV_TIMEOUT_MS) || 90000 });
+        await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: Number(process.env.NAV_TIMEOUT_MS) || 90000 });
         console.log("Navigation successful.");
 
         console.log("Waiting for profile name element...");
