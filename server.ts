@@ -134,7 +134,7 @@ app.post(
         }
       });
       page.setDefaultNavigationTimeout(
-        Number(process.env.NAV_TIMEOUT_MS) || 60000
+        Number(process.env.NAV_TIMEOUT_MS) || 120000
       );
       page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 60000);
 
@@ -142,8 +142,7 @@ app.post(
 
       console.log("Navigating to LinkedIn profile...");
       await page.goto(profileUrl, {
-        waitUntil: "networkidle2",
-        timeout: Number(process.env.NAV_TIMEOUT_MS) || 90000,
+        waitUntil: "domcontentloaded",
       });
       // wait until page's main heading (<h1>) is populated instead of arbitrary delay
       await page.waitForFunction(() => {
