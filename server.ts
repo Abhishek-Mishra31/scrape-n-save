@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import puppeteer from "puppeteer-extra";
-import { Browser, Page, Protocol } from "puppeteer";
+import { Browser, Page, Protocol, devices } from "puppeteer";
 import cors from "cors";
 import * as cheerio from "cheerio";
 import "dotenv/config";
@@ -160,7 +160,10 @@ app.post(
         waitUntil: "domcontentloaded",
       });
       // Robust: wait for <h1> to appear (up to ELEM_TIMEOUT_MS, default 45s)
-      await page.waitForSelector('h1', {
+      const NAME_SELECTOR = process.env.USE_MOBILE === 'true'
+        ? 'div[class*="profile-topcard-person-entity__name"], h1'
+        : 'h1';
+      await page.waitForSelector(NAME_SELECTOR, {
         visible: true,
         timeout: Number(process.env.ELEM_TIMEOUT_MS) || 45000,
       });
@@ -174,7 +177,7 @@ app.post(
 
       console.log("Scraping data...");
 
-      const name: string = $("h1").text().trim();
+      const name: string = $("h1, div[class*='profile-topcard-person-entity__name']").first().text().trim();
       const imageUrl: string | undefined = $("div.pv-top-card--photo img").attr(
         "src"
       );
