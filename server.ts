@@ -103,13 +103,16 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         });
 
         const page = await browser.newPage();
+        // Increase default navigation timeout (can override with NAV_TIMEOUT_MS env var)
+        page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 90000);
+        page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 90000);
 
         console.log("Loading cookies...");
         await loadCookies(page);
         console.log("Cookies loaded successfully.");
 
         console.log("Navigating to LinkedIn profile...");
-        await page.goto(profileUrl, { waitUntil: 'domcontentloaded' });
+        await page.goto(profileUrl, { waitUntil: 'networkidle2', timeout: Number(process.env.NAV_TIMEOUT_MS) || 90000 });
         console.log("Navigation successful.");
 
         console.log("Waiting for profile name element...");
