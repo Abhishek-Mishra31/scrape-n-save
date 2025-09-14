@@ -144,11 +144,11 @@ app.post(
       await page.goto(profileUrl, {
         waitUntil: "domcontentloaded",
       });
-      // wait until page's main heading (<h1>) is populated instead of arbitrary delay
-      await page.waitForFunction(() => {
-        const h1 = document.querySelector('h1');
-        return h1 && h1.textContent && h1.textContent.trim().length > 0;
-      }, { timeout: 15000 });
+      // Robust: wait for <h1> to appear (up to ELEM_TIMEOUT_MS, default 45s)
+      await page.waitForSelector('h1', {
+        visible: true,
+        timeout: Number(process.env.ELEM_TIMEOUT_MS) || 45000,
+      });
       console.log("Navigation successful.");
 
       // Quick wait for profile name; don't fail if not found fast
