@@ -51,6 +51,11 @@ async function getBrowser(): Promise<Browser> {
         "--disable-features=TranslateUI",
         "--no-first-run",
         "--no-default-browser-check",
+        "--disable-gpu",
+        "--single-process",
+        "--no-zygote",
+        "--renderer-process-limit=1",
+        "--js-flags=--max-old-space-size=128",
       ],
     });
   }
@@ -123,6 +128,12 @@ app.post(
     try {
       browser = await getBrowser();
       page = await browser.newPage();
+      // If USE_MOBILE=true, emulate iPhone to use lightweight mobile LinkedIn
+      if (process.env.USE_MOBILE === 'true') {
+        const { devices } = require('puppeteer');
+        const iPhone = devices['iPhone 12'];
+        await page.emulate(iPhone);
+      }
       // Block images, stylesheets and other heavy resources to speed up scraping
       await page.setRequestInterception(true);
       page.on("request", (req) => {
@@ -141,7 +152,11 @@ app.post(
       await ensureCookies(page);
 
       console.log("Navigating to LinkedIn profile...");
-      await page.goto(profileUrl, {
+      // Use mobile site if enabled to reduce payload
+      const targetUrl = process.env.USE_MOBILE === 'true'
+        ? profileUrl.replace('www.linkedin.com', 'm.linkedin.com')
+        : profileUrl;
+      await page.goto(targetUrl, {
         waitUntil: "domcontentloaded",
       });
       // Robust: wait for <h1> to appear (up to ELEM_TIMEOUT_MS, default 45s)
