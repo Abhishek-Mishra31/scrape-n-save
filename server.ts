@@ -30,6 +30,40 @@ interface LinkedInProfile {
     profileUrl: string;
 }
 
+// -------------------- Optimisation Helpers --------------------
+let browserPromise: Promise<Browser> | null = null;
+
+async function getBrowser(): Promise<Browser> {
+    if (!browserPromise) {
+        console.log("Launching shared Puppeteer browser (cold-start)…");
+        browserPromise = puppeteer.launch({
+            headless: true,
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-features=TranslateUI",
+                "--no-first-run",
+                "--no-default-browser-check"
+            ],
+        });
+    }
+    return browserPromise;
+}
+
+let cookiesLoaded = false;
+async function ensureCookies(page: Page) {
+    if (cookiesLoaded) return;
+    await loadCookies(page);
+    cookiesLoaded = true;
+}
+
+// -------------------- Express --------------------
 const app = express();
 const PORT: number = Number(process.env.PORT) || 3000;
 
@@ -81,28 +115,11 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         return res.status(400).json({ error: "Profile URL is required" });
     }
 
-    let browser: Browser | undefined;
+    let browser: Browser;
+    let page: Page | undefined;
     try {
-        console.log("Launching Puppeteer...");
-        browser = await puppeteer.launch({
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox",
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-features=TranslateUI",
-                "--disable-web-security",
-                "--no-first-run",
-                "--no-default-browser-check",
-            ],
-        });
-
-        const page = await browser.newPage();
+        browser = await getBrowser();
+        page = await browser.newPage();
         // Block images, stylesheets and other heavy resources to speed up scraping
         await page.setRequestInterception(true);
         page.on('request', (req) => {
@@ -116,17 +133,14 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 90000);
         page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 90000);
 
-        console.log("Loading cookies...");
-        await loadCookies(page);
-        console.log("Cookies loaded successfully.");
+        await ensureCookies(page);
 
         console.log("Navigating to LinkedIn profile...");
         await page.goto(profileUrl, { waitUntil: 'domcontentloaded', timeout: Number(process.env.NAV_TIMEOUT_MS) || 90000 });
         console.log("Navigation successful.");
 
-        console.log("Waiting for profile name element...");
-        await page.waitForSelector("h1")
-        console.log("Profile name element found.");
+        // Quick wait for profile name; don't fail if not found fast
+        await page.waitForSelector("h1", { timeout: 5000 }).catch(() => {});
 
         const pageContent = await page.content();
         const $ = cheerio.load(pageContent);
@@ -345,9 +359,8 @@ degree: (educationExperiences[0]?.courseName || educationExperiences[0]?.educati
             details: error.message,
         });
     } finally {
-        if (browser) {
-            console.log("Closing Puppeteer...");
-            await browser.close();
+        if (page) {
+            try { await page.close(); } catch (e) { console.warn('Failed to close page', e); }
         }
     }
 });
