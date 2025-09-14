@@ -85,7 +85,7 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
     try {
         console.log("Launching Puppeteer...");
         browser = await puppeteer.launch({
-            headless: true,
+            headless: false,
             executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
             args: [
                 "--no-sandbox",
@@ -125,7 +125,7 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         console.log("Navigation successful.");
 
         console.log("Waiting for profile name element...");
-        await page.waitForSelector("h1", { timeout: 60000 });
+        await page.waitForSelector("h1")
         console.log("Profile name element found.");
 
         const pageContent = await page.content();
