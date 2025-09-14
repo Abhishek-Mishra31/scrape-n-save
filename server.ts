@@ -1,6 +1,6 @@
 import express, { Request, Response } from "express";
 import puppeteer from "puppeteer-extra";
-import { Browser, Page, Protocol, devices } from "puppeteer";
+import { Browser, Page, Protocol } from "puppeteer";
 import cors from "cors";
 import * as cheerio from "cheerio";
 import "dotenv/config";
@@ -163,10 +163,14 @@ app.post(
       const NAME_SELECTOR = process.env.USE_MOBILE === 'true'
         ? 'div[class*="profile-topcard-person-entity__name"], h1'
         : 'h1';
-      await page.waitForSelector(NAME_SELECTOR, {
-        visible: true,
-        timeout: Number(process.env.ELEM_TIMEOUT_MS) || 45000,
-      });
+      try {
+        await page.waitForSelector(NAME_SELECTOR, {
+          visible: true,
+          timeout: Number(process.env.ELEM_TIMEOUT_MS) || 45000,
+        });
+      } catch(e) {
+        console.warn('Name selector not found within timeout, continuing anyway');
+      }
       console.log("Navigation successful.");
 
       // Quick wait for profile name; don't fail if not found fast
