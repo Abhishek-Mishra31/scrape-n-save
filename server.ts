@@ -124,14 +124,14 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         await page.setRequestInterception(true);
         page.on('request', (req) => {
             const resourceType = req.resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+            if (['image', 'stylesheet', 'font', 'media', 'script', 'xhr', 'fetch', 'eventsource'].includes(resourceType)) {
                 req.abort();
             } else {
                 req.continue();
             }
         });
-        page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 90000);
-        page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 90000);
+        page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 60000);
+        page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 60000);
 
         await ensureCookies(page);
 
