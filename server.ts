@@ -103,7 +103,16 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         });
 
         const page = await browser.newPage();
-        // Increase default navigation timeout (can override with NAV_TIMEOUT_MS env var)
+        // Block images, stylesheets and other heavy resources to speed up scraping
+        await page.setRequestInterception(true);
+        page.on('request', (req) => {
+            const resourceType = req.resourceType();
+            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
+                req.abort();
+            } else {
+                req.continue();
+            }
+        });
         page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 90000);
         page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 90000);
 
