@@ -35,6 +35,16 @@ const PORT: number = Number(process.env.PORT);
 
 app.use(express.json());
 app.use(cors());
+
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+
+// Root endpoint
+app.get('/', (req, res) => {
+  res.json({ message: 'LinkedIn Scraper API', status: 'running' });
+});
 puppeteer.use(StealthPlugin());
 
 /**
@@ -46,16 +56,24 @@ async function loadCookies(page: Page): Promise<void> {
   let cookies: Protocol.Network.Cookie[];
 
   if (!fs.existsSync("linked_cookies.json")) {
-    console.log("Cookies file not found, running login script...");
-    const fetchedCookies = await loginAndGetSessionCookie();
-    if (!fetchedCookies) {
-      throw new Error("Failed to log in and get cookies.");
+    console.log("Cookies file not found, attempting to generate new cookies...");
+    try {
+      const fetchedCookies = await loginAndGetSessionCookie();
+      if (!fetchedCookies) {
+        throw new Error("Failed to log in and get cookies.");
+      }
+      cookies = fetchedCookies;
+      fs.writeFileSync("linked_cookies.json", JSON.stringify(cookies, null, 2));
+      console.log("New cookies generated and saved successfully.");
+    } catch (loginError: any) {
+      console.error("Cookie generation failed:", loginError.message);
+      throw new Error(`Authentication failed: ${loginError.message}`);
     }
-    cookies = fetchedCookies;
-    fs.writeFileSync("linked_cookies.json", JSON.stringify(cookies, null, 2));
   } else {
+    console.log("Loading existing cookies...");
     const cookiesJson = fs.readFileSync("linked_cookies.json", "utf-8");
     cookies = JSON.parse(cookiesJson);
+    console.log(`Loaded ${cookies.length} cookies from file.`);
   }
   const puppeteerCookies = cookies.map((cookie) => ({
     name: cookie.name,
@@ -77,6 +95,16 @@ async function loadCookies(page: Page): Promise<void> {
 app.post(
   "/scrape",
   async (req: Request<{}, {}, ScrapeRequestBody>, res: Response) => {
+    // Set a timeout for the entire scraping operation
+    const timeout = setTimeout(() => {
+      console.error('Scraping operation timed out after 5 minutes');
+      if (!res.headersSent) {
+        res.status(408).json({
+          error: 'Request timeout', 
+          details: 'Scraping took too long and was terminated'
+        });
+      }
+    }, 300000); // 5 minutes
     const { profileUrl } = req.body;
 
     if (!profileUrl) {
@@ -420,9 +448,13 @@ app.post(
         message: "Profile scraped and saved successfully",
         savedTo: dataFile,
       };
+        clearTimeout(timeout);
+        if (!res.headersSent) {
+          res.json(responsePayload);
+        }
 
-      res.json(responsePayload);
     } catch (error: any) {
+        clearTimeout(timeout);
       console.error("Error scraping LinkedIn profile:", error);
       res.status(500).json({
         error: "Failed to scrape LinkedIn profile",
@@ -437,12 +469,8 @@ app.post(
   }
 );
 
-(async () => {
-  if (!fs.existsSync("linked_cookies.json")) {
-    console.log("Cookies file not found, running login script on startup...");
-    await loginAndGetSessionCookie();
-  }
-})();
+// Remove automatic login on startup - handle it per request instead
+console.log("Server starting - cookies will be loaded per request if needed");
 
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
