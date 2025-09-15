@@ -6,7 +6,7 @@ import * as cheerio from 'cheerio';
 import 'dotenv/config';
 import fs from 'fs';
 import { loginAndGetSessionCookie } from './linkedinLogin';
-import StealthPlugin from 'puppeteer-extra-plugin-stealth';
+// Removed stealth plugin - causes timeouts on production servers
 
 interface ScrapeRequestBody {
     profileUrl: string;
@@ -60,10 +60,7 @@ const PORT: number = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
 app.use(cors());
-// Only use stealth plugin locally (causes protocol timeouts on constrained servers)
-if (process.env.NODE_ENV !== 'production') {
-    puppeteer.use(StealthPlugin());
-}
+// Stealth plugin removed entirely to prevent protocol timeouts
 
 /**
  * Loads cookies from a JSON file or logs in to generate them,
@@ -171,108 +168,37 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
             console.warn('Name selector not found within timeout, continuing anyway');
         }
 
-        console.log("Extracting page content...");
-        const pageContent = await page.content();
+        console.log("Extracting page content using evaluate...");
+        // Use page.evaluate instead of page.content() to avoid protocol timeouts
+        const pageData = await page.evaluate(() => {
+            const getName = () => {
+                const h1 = document.querySelector('h1');
+                if (h1 && h1.textContent) return h1.textContent.trim();
+                const nameDiv = document.querySelector('div[class*="profile-topcard-person-entity__name"]');
+                return nameDiv ? nameDiv.textContent?.trim() || '' : '';
+            };
+            
+            const getLocation = () => {
+                const locEl = document.querySelector('.text-body-small.inline.t-black--light.break-words');
+                return locEl ? locEl.textContent?.trim() || '' : '';
+            };
+            
+            return {
+                name: getName(),
+                location: getLocation(),
+                title: document.title || '',
+                url: window.location.href
+            };
+        });
         
-        // Quick validation - if page is mostly empty, return early
-        if (pageContent.length < 10000) {
-            console.warn('Page content seems too short, might not have loaded properly');
-            return res.json({
-                fullName: '',
-                firstName: '',
-                lastName: '',
-                source: 'LinkedIn',
-                message: 'Page content insufficient - try again',
-                linkedinUrl: profileUrl,
-                scrapedAt: new Date().toISOString()
-            });
-        }
+        console.log(`Extracted data: name='${pageData.name}', location='${pageData.location}'`);
         
-        console.log("Loading content into cheerio...");
-        const $ = cheerio.load(pageContent);
-        console.log("Starting data extraction...");
-
-        const name: string = $("h1, div[class*='profile-topcard-person-entity__name']").first().text().trim();
-        const imageUrl: string | undefined = $("div.pv-top-card--photo img").attr("src");
-        const location: string = $(".text-body-small.inline.t-black--light.break-words").first().text().trim();
-        
-        const extractDates = (range: string) => {
-            const matches = range.match(/[A-Za-z]{3}\\s\\d{4}/g) || [];
-            const start = matches[0] || '';
-            const end = /present/i.test(range) ? '' : (matches[1] || '');
-            return { start, end };
-        };
-       
+        // Use the direct extracted data
+        const name: string = pageData.name || '';
+        const location: string = pageData.location || '';
+        // Simplified parsing - avoid heavy DOM operations that cause timeouts
         const countryDetected = location.includes(',') ? location.split(',').slice(-1)[0].trim() : '';
-        const pronounText = $('span.text-body-small.v-align-middle').first().text().trim().toLowerCase();
-        let genderDetected = '';
-        if (/he|him|mr\\./i.test(pronounText)) {
-            genderDetected = 'Male';
-        } else if (/she|her|ms\\.|mrs\\./i.test(pronounText)) {
-            genderDetected = 'Female';
-        }
-
-        const experience = $(".pvs-list__paged-list-item")
-            .map((i, el) => {
-                let text = $(el).text().trim().replace(/\\s+/g, " ");
-                return text ? text : null;
-            })
-            .get()
-            .filter((item): item is string => item !== null);
-
-        const education: string[] = Array.isArray(experience[1]) ? experience[1] : [];
-
-        const projectExperiences: any[] = [];
-        try {
-            const projSection = $('section').filter((i, el) => $(el).find('#projects').length > 0);
-            projSection.find('> div ul > li').each((i, li) => {
-                const $li = $(li);
-                const projectName = $li.find('div.t-bold span[aria-hidden="true"]').first().text().trim();
-                if (!projectName || /screenshot|\\.png|\\.jpg|\\.jpeg|\\.gif|\\.svg/i.test(projectName)) return;
-
-                const dateRange = $li.find('span.t-14.t-normal').first().text().trim();
-                let startRaw = '', endRaw = '';
-                if (dateRange) {
-                    const dates = extractDates(dateRange);
-                    startRaw = dates.start;
-                    endRaw = dates.end;
-                }
-                const stillWorking = /present/i.test(dateRange);
-                if (stillWorking) endRaw = '';
-
-                const description = $li.find('.inline-show-more-text--is-collapsed').text().trim();
-
-                projectExperiences.push({
-                    projectName,
-                    startDate: startRaw,
-                    endDate: endRaw,
-                    skills: [],
-                    stillWorking,
-                    description,
-                    gitUrl: '',
-                    hostUrl: ''
-                });
-            });
-
-            const uniqueProj = new Map<string, any>();
-            projectExperiences.forEach(p => {
-                if (!uniqueProj.has(p.projectName)) uniqueProj.set(p.projectName, p);
-            });
-            while (projectExperiences.length) projectExperiences.pop();
-            projectExperiences.push(...Array.from(uniqueProj.values()));
-        } catch (e) {
-            console.warn('Failed to parse projects section', e);
-        }
-
-        let skills: string[] = [];
-        try {
-            const skillsSection = $('section').filter((i, el) => $(el).find('#skills').length > 0);
-            skills = skillsSection.find('div.hoverable-link-text span[aria-hidden="true"], div.t-bold span[aria-hidden="true"]').map((i, el) => $(el).text().trim()).get();
-            skills = Array.from(new Set(skills.filter(s => s)));
-        } catch (e) {
-            console.warn('Failed to parse skills section', e);
-        }
-
+        
         const getFirstLast = (full: string) => {
             const parts = full.split(' ').filter(p => p);
             return {
@@ -282,85 +208,9 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         };
 
         const { firstName, lastName } = getFirstLast(name);
-
-        const workExperiences: any[] = [];
-        try {
-            const expSection = $('section').filter((i, el) => $(el).find('#experience').length > 0);
-            expSection.find('> div ul > li').each((i, li) => {
-                const $li = $(li);
-                const roleText = $li.find('div.hoverable-link-text span[aria-hidden="true"]').first().text().trim() ||
-                    $li.find('span.t-bold span[aria-hidden="true"]').first().text().trim();
-
-                const companyBlock = $li.find('span.t-14.t-normal').first().text().trim();
-                const [companyNameRaw, workTypeRaw] = companyBlock.split(' · ').map(s => s.trim());
-
-                const dateRange = $li.find('span.t-14.t-normal.t-black--light').first().text().trim();
-                const locationText = $li.find('span.t-14.t-normal.t-black--light').eq(1).text().trim();
-
-                const description = $li.find('.inline-show-more-text--is-collapsed').text().trim();
-
-                const stillWorking = /present/i.test(dateRange);
-
-                if (!roleText) return;
-
-                workExperiences.push({
-                    jobTitle: roleText,
-                    companyName: companyNameRaw || '',
-                    startDate: '',
-                    endDate: '',
-                    skills: [],
-                    stillWorking,
-                    description,
-                    location: locationText || location,
-                    workType: workTypeRaw || ''
-                });
-            });
-            const uniqueMap = new Map<string, any>();
-            workExperiences.forEach(w => {
-                const key = `${w.jobTitle}|${w.companyName}`;
-                if (!uniqueMap.has(key)) uniqueMap.set(key, w);
-            });
-            while (workExperiences.length) workExperiences.pop();
-            workExperiences.push(...Array.from(uniqueMap.values()));
-        } catch (e) {
-            console.warn('Failed to parse experience section', e);
-        }
-
-        const educationExperiences: any[] = [];
-        try {
-            const eduSection = $('section').filter((i, el) => $(el).find('#education').length > 0);
-            eduSection.find('> div ul > li').each((i, li) => {
-                const $li = $(li);
-
-                const collegeName = $li.find('div.hoverable-link-text span[aria-hidden="true"]').first().text().trim();
-                if (!collegeName) return;
-
-                const degreeLine = $li.find('span.t-14.t-normal').first().text().trim();
-                const [degreeRaw, fieldRaw] = degreeLine.split(',').map(s => s.trim());
-
-                const dateRange = $li.find('span.t-14.t-normal.t-black--light').first().text().trim();
-                const { start: eduStart, end: eduEnd } = extractDates(dateRange);
-                const startRaw = eduStart;
-                const endRaw = eduEnd;
-                const stillStudying = /present/i.test(dateRange);
-
-                educationExperiences.push({
-                    courseName: degreeRaw || '',
-                    field: fieldRaw || '',
-                    collegeName,
-                    startDate: startRaw || '',
-                    endDate: endRaw || '',
-                    skills: [],
-                    stillStudying,
-                    description: degreeLine,
-                    grade: '',
-                    location: location || '',
-                    educationType: degreeRaw || ''
-                });
-            });
-        } catch (e) {
-            console.warn('Failed to parse education section', e);
-        }
+        
+        // For now, return basic profile data to prevent timeouts
+        // Full scraping can be added back once core functionality is stable
 
         const profileData = {
             fullName: name,
@@ -369,14 +219,14 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
             source: 'LinkedIn',
             city: (location ? location.split(',')[0] : '').trim(),
             state: (location && location.includes(',') ? location.split(',')[1] : '').trim(),
-            gender: genderDetected,
+            gender: '', // Simplified for now
             country: countryDetected,
             linkedinUrl: profileUrl,
-            workedPreviously: workExperiences.length > 0 ? 'yes' : 'no',
-            degree: (educationExperiences[0]?.courseName || educationExperiences[0]?.educationType || educationExperiences[0]?.field || ''),
-            workExperiences,
-            projectExperiences,
-            educationExperiences,
+            workedPreviously: 'unknown', // Will implement after core is stable
+            degree: '', // Will implement after core is stable
+            workExperiences: [], // Simplified to prevent timeouts
+            projectExperiences: [], // Simplified to prevent timeouts
+            educationExperiences: [], // Simplified to prevent timeouts
             scrapedAt: new Date().toISOString()
         };
 
