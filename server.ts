@@ -1,66 +1,41 @@
 import express, { Request, Response } from 'express';
 import puppeteer from 'puppeteer-extra';
-import { Browser, Page, Protocol } from 'puppeteer';
+import { Browser, Page, Protocol, CookieParam } from 'puppeteer';
 import cors from 'cors';
 import * as cheerio from 'cheerio';
 import 'dotenv/config';
 import fs from 'fs';
 import { loginAndGetSessionCookie } from './linkedinLogin';
-// Removed stealth plugin - causes timeouts on production servers
+import StealthPlugin from 'puppeteer-extra-plugin-stealth';
 
 interface ScrapeRequestBody {
     profileUrl: string;
 }
 
-// -------------------- Optimisation Helpers --------------------
-let browserPromise: Promise<Browser> | null = null;
-
-async function getBrowser(): Promise<Browser> {
-    if (!browserPromise) {
-        console.log("Launching shared Puppeteer browser (cold-start)…");
-        browserPromise = puppeteer.launch({
-            headless: true,
-            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
-            protocolTimeout: 180000, // 3 minutes for protocol timeout
-            args: [
-                "--no-sandbox",
-                "--disable-setuid-sandbox", 
-                "--disable-dev-shm-usage",
-                "--disable-blink-features=AutomationControlled",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-features=TranslateUI",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-gpu",
-                "--single-process",
-                "--no-zygote",
-                "--renderer-process-limit=1",
-                "--js-flags=--max-old-space-size=64",
-                "--memory-pressure-off",
-                "--disable-extensions",
-                "--disable-plugins",
-            ],
-        });
-    }
-    return browserPromise;
+interface ContactRequestBody {
+    name: string;
+    email: string;
+    message: string;
 }
 
-let cookiesLoaded = false;
-async function ensureCookies(page: Page) {
-    if (cookiesLoaded) return;
-    await loadCookies(page);
-    cookiesLoaded = true;
+interface SearchRequestBody {
+    username: string;
 }
 
-// -------------------- Express --------------------
+interface LinkedInProfile {
+    name: string;
+    headline: string;
+    location: string;
+    imageUrl: string | null;
+    profileUrl: string;
+}
+
 const app = express();
-const PORT: number = Number(process.env.PORT) || 3000;
+const PORT: number = Number(process.env.PORT);
 
 app.use(express.json());
 app.use(cors());
-// Stealth plugin removed entirely to prevent protocol timeouts
+puppeteer.use(StealthPlugin());
 
 /**
  * Loads cookies from a JSON file or logs in to generate them,
@@ -98,16 +73,6 @@ async function loadCookies(page: Page): Promise<void> {
     console.log("Cookies loaded and set successfully.");
 }
 
-// Health check endpoint for Render
-app.get('/health', (req, res) => {
-    res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
-});
-
-// Root endpoint
-app.get('/', (req, res) => {
-    res.json({ message: 'LinkedIn Scraper API', status: 'running' });
-});
-
 // endpoint that will scrape the profile using linkedin profile url
 app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Response) => {
     const { profileUrl } = req.body;
@@ -116,89 +81,120 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         return res.status(400).json({ error: "Profile URL is required" });
     }
 
-    let browser: Browser;
-    let page: Page | undefined;
+    let browser: Browser | undefined;
     try {
-        browser = await getBrowser();
-        page = await browser.newPage();
-        
-        // If USE_MOBILE=true, emulate iPhone to use lightweight mobile LinkedIn
-        if (process.env.USE_MOBILE === 'true') {
-            const { devices } = require('puppeteer');
-            const iPhone = devices['iPhone 12'];
-            await page.emulate(iPhone);
-        }
-        
-        // Block images and heavy resources to speed up scraping
-        await page.setRequestInterception(true);
-        page.on('request', (req) => {
-            const resourceType = req.resourceType();
-            if (['image', 'stylesheet', 'font', 'media'].includes(resourceType)) {
-                req.abort();
-            } else {
-                req.continue();
-            }
+        console.log("Launching Puppeteer...");
+        browser = await puppeteer.launch({
+            headless: true,
+            executablePath: puppeteer.executablePath(),
+            args: [
+                "--no-sandbox",
+                "--disable-setuid-sandbox",
+                "--disable-dev-shm-usage",
+                "--disable-blink-features=AutomationControlled",
+            ],
         });
-        
-        page.setDefaultNavigationTimeout(Number(process.env.NAV_TIMEOUT_MS) || 60000);
-        page.setDefaultTimeout(Number(process.env.PAGE_TIMEOUT_MS) || 60000);
 
-        await ensureCookies(page);
+        const page = await browser.newPage();
+
+        console.log("Loading cookies...");
+        await loadCookies(page);
+        console.log("Cookies loaded successfully.");
 
         console.log("Navigating to LinkedIn profile...");
-        // Use mobile site if enabled to reduce payload
-        const targetUrl = process.env.USE_MOBILE === 'true'
-            ? profileUrl.replace('www.linkedin.com', 'm.linkedin.com')
-            : profileUrl;
-        await page.goto(targetUrl, {
-            waitUntil: 'domcontentloaded',
-        });
+        await page.goto(profileUrl, { waitUntil: 'domcontentloaded' });
         console.log("Navigation successful.");
 
-        // Quick wait for profile name with fallback
-        const NAME_SELECTOR = process.env.USE_MOBILE === 'true'
-            ? 'div[class*="profile-topcard-person-entity__name"], h1'
-            : 'h1';
-        try {
-            await page.waitForSelector(NAME_SELECTOR, {
-                visible: true,
-                timeout: Number(process.env.ELEM_TIMEOUT_MS) || 30000,
-            });
-        } catch(e) {
-            console.warn('Name selector not found within timeout, continuing anyway');
+        console.log("Waiting for profile name element...");
+        await page.waitForSelector("h1", { timeout: 60000 });
+        console.log("Profile name element found.");
+
+        const pageContent = await page.content();
+        const $ = cheerio.load(pageContent);
+
+        console.log("Scraping data...");
+
+        const name: string = $("h1").text().trim();
+        const imageUrl: string | undefined = $("div.pv-top-card--photo img").attr("src");
+        const location: string = $(".text-body-small.inline.t-black--light.break-words").first().text().trim();
+        
+        const extractDates = (range: string) => {
+            const matches = range.match(/[A-Za-z]{3}\s\d{4}/g) || [];
+            const start = matches[0] || '';
+            const end = /present/i.test(range) ? '' : (matches[1] || '');
+            return { start, end };
+        };
+       
+        const countryDetected = location.includes(',') ? location.split(',').slice(-1)[0].trim() : '';
+        const pronounText = $('span.text-body-small.v-align-middle').first().text().trim().toLowerCase();
+        let genderDetected = '';
+        if (/he|him|mr\./i.test(pronounText)) {
+            genderDetected = 'Male';
+        } else if (/she|her|ms\.|mrs\./i.test(pronounText)) {
+            genderDetected = 'Female';
         }
 
-        console.log("Extracting page content using evaluate...");
-        // Use page.evaluate instead of page.content() to avoid protocol timeouts
-        const pageData = await page.evaluate(() => {
-            const getName = () => {
-                const h1 = document.querySelector('h1');
-                if (h1 && h1.textContent) return h1.textContent.trim();
-                const nameDiv = document.querySelector('div[class*="profile-topcard-person-entity__name"]');
-                return nameDiv ? nameDiv.textContent?.trim() || '' : '';
-            };
-            
-            const getLocation = () => {
-                const locEl = document.querySelector('.text-body-small.inline.t-black--light.break-words');
-                return locEl ? locEl.textContent?.trim() || '' : '';
-            };
-            
-            return {
-                name: getName(),
-                location: getLocation(),
-                title: document.title || '',
-                url: window.location.href
-            };
-        });
-        
-        console.log(`Extracted data: name='${pageData.name}', location='${pageData.location}'`);
-        
-        // Use the direct extracted data
-        const name: string = pageData.name || '';
-        const location: string = pageData.location || '';
-        // Simplified parsing - avoid heavy DOM operations that cause timeouts
-        const countryDetected = location.includes(',') ? location.split(',').slice(-1)[0].trim() : '';
-        
+        const experience = $(".pvs-list__paged-list-item")
+            .map((i, el) => {
+                let text = $(el).text().trim().replace(/\s+/g, " ");
+                return text ? text : null;
+            })
+            .get()
+            .filter((item): item is string => item !== null);
+
+        const education: string[] = Array.isArray(experience[1]) ? experience[1] : [];
+
+        const projectExperiences: any[] = [];
+        try {
+            const projSection = $('section').filter((i, el) => $(el).find('#projects').length > 0);
+            projSection.find('> div ul > li').each((i, li) => {
+                const $li = $(li);
+                const projectName = $li.find('div.t-bold span[aria-hidden="true"]').first().text().trim();
+                if (!projectName || /screenshot|\.png|\.jpg|\.jpeg|\.gif|\.svg/i.test(projectName)) return;
+
+                const dateRange = $li.find('span.t-14.t-normal').first().text().trim();
+                let startRaw = '', endRaw = '';
+                if (dateRange) {
+                    const dates = extractDates(dateRange);
+                    startRaw = dates.start;
+                    endRaw = dates.end;
+                }
+                const stillWorking = /present/i.test(dateRange);
+                if (stillWorking) endRaw = '';
+
+                const description = $li.find('.inline-show-more-text--is-collapsed').text().trim();
+
+                projectExperiences.push({
+                    projectName,
+                    startDate: startRaw,
+                    endDate: endRaw,
+                    skills: [],
+                    stillWorking,
+                    description,
+                    gitUrl: '',
+                    hostUrl: ''
+                });
+            });
+
+            const uniqueProj = new Map<string, any>();
+            projectExperiences.forEach(p => {
+                if (!uniqueProj.has(p.projectName)) uniqueProj.set(p.projectName, p);
+            });
+            while (projectExperiences.length) projectExperiences.pop();
+            projectExperiences.push(...Array.from(uniqueProj.values()));
+        } catch (e) {
+            console.warn('Failed to parse projects section', e);
+        }
+
+        let skills: string[] = [];
+        try {
+            const skillsSection = $('section').filter((i, el) => $(el).find('#skills').length > 0);
+            skills = skillsSection.find('div.hoverable-link-text span[aria-hidden="true"], div.t-bold span[aria-hidden="true"]').map((i, el) => $(el).text().trim()).get();
+            skills = Array.from(new Set(skills.filter(s => s)));
+        } catch (e) {
+            console.warn('Failed to parse skills section', e);
+        }
+
         const getFirstLast = (full: string) => {
             const parts = full.split(' ').filter(p => p);
             return {
@@ -208,9 +204,85 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
         };
 
         const { firstName, lastName } = getFirstLast(name);
-        
-        // For now, return basic profile data to prevent timeouts
-        // Full scraping can be added back once core functionality is stable
+
+        const workExperiences: any[] = [];
+        try {
+            const expSection = $('section').filter((i, el) => $(el).find('#experience').length > 0);
+            expSection.find('> div ul > li').each((i, li) => {
+                const $li = $(li);
+                const roleText = $li.find('div.hoverable-link-text span[aria-hidden="true"]').first().text().trim() ||
+                    $li.find('span.t-bold span[aria-hidden="true"]').first().text().trim();
+
+                const companyBlock = $li.find('span.t-14.t-normal').first().text().trim();
+                const [companyNameRaw, workTypeRaw] = companyBlock.split(' · ').map(s => s.trim());
+
+                const dateRange = $li.find('span.t-14.t-normal.t-black--light').first().text().trim();
+                const locationText = $li.find('span.t-14.t-normal.t-black--light').eq(1).text().trim();
+
+                const description = $li.find('.inline-show-more-text--is-collapsed').text().trim();
+
+                const stillWorking = /present/i.test(dateRange);
+
+                if (!roleText) return;
+
+                workExperiences.push({
+                    jobTitle: roleText,
+                    companyName: companyNameRaw || '',
+                    startDate: '',
+                    endDate: '',
+                    skills: [],
+                    stillWorking,
+                    description,
+                    location: locationText || location,
+                    workType: workTypeRaw || ''
+                });
+            });
+            const uniqueMap = new Map<string, any>();
+            workExperiences.forEach(w => {
+                const key = `${w.jobTitle}|${w.companyName}`;
+                if (!uniqueMap.has(key)) uniqueMap.set(key, w);
+            });
+            while (workExperiences.length) workExperiences.pop();
+            workExperiences.push(...Array.from(uniqueMap.values()));
+        } catch (e) {
+            console.warn('Failed to parse experience section', e);
+        }
+
+        const educationExperiences: any[] = [];
+        try {
+            const eduSection = $('section').filter((i, el) => $(el).find('#education').length > 0);
+            eduSection.find('> div ul > li').each((i, li) => {
+                const $li = $(li);
+
+                const collegeName = $li.find('div.hoverable-link-text span[aria-hidden="true"]').first().text().trim();
+                if (!collegeName) return;
+
+                const degreeLine = $li.find('span.t-14.t-normal').first().text().trim();
+                const [degreeRaw, fieldRaw] = degreeLine.split(',').map(s => s.trim());
+
+                const dateRange = $li.find('span.t-14.t-normal.t-black--light').first().text().trim();
+                const { start: eduStart, end: eduEnd } = extractDates(dateRange);
+                const startRaw = eduStart;
+                const endRaw = eduEnd;
+                const stillStudying = /present/i.test(dateRange);
+
+                educationExperiences.push({
+                    courseName: degreeRaw || '',
+                    field: fieldRaw || '',
+                    collegeName,
+                    startDate: startRaw || '',
+                    endDate: endRaw || '',
+                    skills: [],
+                    stillStudying,
+                    description: degreeLine,
+                    grade: '',
+                    location: location || '',
+                    educationType: degreeRaw || ''
+                });
+            });
+        } catch (e) {
+            console.warn('Failed to parse education section', e);
+        }
 
         const profileData = {
             fullName: name,
@@ -219,14 +291,14 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
             source: 'LinkedIn',
             city: (location ? location.split(',')[0] : '').trim(),
             state: (location && location.includes(',') ? location.split(',')[1] : '').trim(),
-            gender: '', // Simplified for now
+            gender: genderDetected,
             country: countryDetected,
             linkedinUrl: profileUrl,
-            workedPreviously: 'unknown', // Will implement after core is stable
-            degree: '', // Will implement after core is stable
-            workExperiences: [], // Simplified to prevent timeouts
-            projectExperiences: [], // Simplified to prevent timeouts
-            educationExperiences: [], // Simplified to prevent timeouts
+workedPreviously: workExperiences.length > 0 ? 'yes' : 'no',
+degree: (educationExperiences[0]?.courseName || educationExperiences[0]?.educationType || educationExperiences[0]?.field || ''),
+            workExperiences,
+            projectExperiences,
+            educationExperiences,
             scrapedAt: new Date().toISOString()
         };
 
@@ -254,11 +326,13 @@ app.post("/scrape", async (req: Request<{}, {}, ScrapeRequestBody>, res: Respons
             details: error.message,
         });
     } finally {
-        if (page) {
-            try { await page.close(); } catch (e) { console.warn('Failed to close page', e); }
+        if (browser) {
+            console.log("Closing Puppeteer...");
+            await browser.close();
         }
     }
 });
+
 
 (async () => {
     if (!fs.existsSync("linked_cookies.json")) {
