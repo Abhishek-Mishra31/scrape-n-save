@@ -76,18 +76,18 @@ function loadCookies(page) {
             fs_1.default.writeFileSync("linked_cookies.json", JSON.stringify(cookies, null, 2));
         }
         else {
-            const cookiesJson = fs_1.default.readFileSync("linked_cookies.json", 'utf-8');
+            const cookiesJson = fs_1.default.readFileSync("linked_cookies.json", "utf-8");
             cookies = JSON.parse(cookiesJson);
         }
-        const puppeteerCookies = cookies.map(cookie => ({
+        const puppeteerCookies = cookies.map((cookie) => ({
             name: cookie.name,
             value: cookie.value,
-            domain: cookie.domain || '.linkedin.com',
-            path: cookie.path || '/',
+            domain: cookie.domain || ".linkedin.com",
+            path: cookie.path || "/",
             expires: cookie.expires,
             httpOnly: cookie.httpOnly,
             secure: cookie.secure,
-            sameSite: cookie.sameSite
+            sameSite: cookie.sameSite,
         }));
         console.log("Setting cookies in browser...");
         yield page.setCookie(...puppeteerCookies);
@@ -115,35 +115,55 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             ],
         });
         const page = yield browser.newPage();
+        // Set longer timeouts
+        page.setDefaultNavigationTimeout(120000);
+        page.setDefaultTimeout(90000);
         console.log("Loading cookies...");
         yield loadCookies(page);
         console.log("Cookies loaded successfully.");
         console.log("Navigating to LinkedIn profile...");
-        yield page.goto(profileUrl, { waitUntil: 'domcontentloaded' });
+        yield page.goto(profileUrl, {
+            waitUntil: "domcontentloaded",
+            timeout: 120000
+        });
         console.log("Navigation successful.");
         console.log("Waiting for profile name element...");
-        yield page.waitForSelector("h1", { timeout: 60000 });
-        console.log("Profile name element found.");
+        try {
+            yield page.waitForSelector("h1", { timeout: 30000 });
+            console.log("Profile name element found.");
+        }
+        catch (e) {
+            console.log("Profile name element not found quickly, continuing anyway...");
+        }
         const pageContent = yield page.content();
         const $ = cheerio.load(pageContent);
         console.log("Scraping data...");
         const name = $("h1").text().trim();
         const imageUrl = $("div.pv-top-card--photo img").attr("src");
-        const location = $(".text-body-small.inline.t-black--light.break-words").first().text().trim();
+        const location = $(".text-body-small.inline.t-black--light.break-words")
+            .first()
+            .text()
+            .trim();
         const extractDates = (range) => {
             const matches = range.match(/[A-Za-z]{3}\s\d{4}/g) || [];
-            const start = matches[0] || '';
-            const end = /present/i.test(range) ? '' : (matches[1] || '');
+            const start = matches[0] || "";
+            const end = /present/i.test(range) ? "" : matches[1] || "";
             return { start, end };
         };
-        const countryDetected = location.includes(',') ? location.split(',').slice(-1)[0].trim() : '';
-        const pronounText = $('span.text-body-small.v-align-middle').first().text().trim().toLowerCase();
-        let genderDetected = '';
+        const countryDetected = location.includes(",")
+            ? location.split(",").slice(-1)[0].trim()
+            : "";
+        const pronounText = $("span.text-body-small.v-align-middle")
+            .first()
+            .text()
+            .trim()
+            .toLowerCase();
+        let genderDetected = "";
         if (/he|him|mr\./i.test(pronounText)) {
-            genderDetected = 'Male';
+            genderDetected = "Male";
         }
         else if (/she|her|ms\.|mrs\./i.test(pronounText)) {
-            genderDetected = 'Female';
+            genderDetected = "Female";
         }
         const experience = $(".pvs-list__paged-list-item")
             .map((i, el) => {
@@ -152,17 +172,28 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         })
             .get()
             .filter((item) => item !== null);
-        const education = Array.isArray(experience[1]) ? experience[1] : [];
+        const education = Array.isArray(experience[1])
+            ? experience[1]
+            : [];
         const projectExperiences = [];
         try {
-            const projSection = $('section').filter((i, el) => $(el).find('#projects').length > 0);
-            projSection.find('> div ul > li').each((i, li) => {
+            const projSection = $("section").filter((i, el) => $(el).find("#projects").length > 0);
+            projSection.find("> div ul > li").each((i, li) => {
                 const $li = $(li);
-                const projectName = $li.find('div.t-bold span[aria-hidden="true"]').first().text().trim();
-                if (!projectName || /screenshot|\.png|\.jpg|\.jpeg|\.gif|\.svg/i.test(projectName))
+                const projectName = $li
+                    .find('div.t-bold span[aria-hidden="true"]')
+                    .first()
+                    .text()
+                    .trim();
+                if (!projectName ||
+                    /screenshot|\.png|\.jpg|\.jpeg|\.gif|\.svg/i.test(projectName))
                     return;
-                const dateRange = $li.find('span.t-14.t-normal').first().text().trim();
-                let startRaw = '', endRaw = '';
+                const dateRange = $li
+                    .find("span.t-14.t-normal")
+                    .first()
+                    .text()
+                    .trim();
+                let startRaw = "", endRaw = "";
                 if (dateRange) {
                     const dates = extractDates(dateRange);
                     startRaw = dates.start;
@@ -170,8 +201,11 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                 }
                 const stillWorking = /present/i.test(dateRange);
                 if (stillWorking)
-                    endRaw = '';
-                const description = $li.find('.inline-show-more-text--is-collapsed').text().trim();
+                    endRaw = "";
+                const description = $li
+                    .find(".inline-show-more-text--is-collapsed")
+                    .text()
+                    .trim();
                 projectExperiences.push({
                     projectName,
                     startDate: startRaw,
@@ -179,12 +213,12 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
                     skills: [],
                     stillWorking,
                     description,
-                    gitUrl: '',
-                    hostUrl: ''
+                    gitUrl: "",
+                    hostUrl: "",
                 });
             });
             const uniqueProj = new Map();
-            projectExperiences.forEach(p => {
+            projectExperiences.forEach((p) => {
                 if (!uniqueProj.has(p.projectName))
                     uniqueProj.set(p.projectName, p);
             });
@@ -193,54 +227,82 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             projectExperiences.push(...Array.from(uniqueProj.values()));
         }
         catch (e) {
-            console.warn('Failed to parse projects section', e);
+            console.warn("Failed to parse projects section", e);
         }
         let skills = [];
         try {
-            const skillsSection = $('section').filter((i, el) => $(el).find('#skills').length > 0);
-            skills = skillsSection.find('div.hoverable-link-text span[aria-hidden="true"], div.t-bold span[aria-hidden="true"]').map((i, el) => $(el).text().trim()).get();
-            skills = Array.from(new Set(skills.filter(s => s)));
+            const skillsSection = $("section").filter((i, el) => $(el).find("#skills").length > 0);
+            skills = skillsSection
+                .find('div.hoverable-link-text span[aria-hidden="true"], div.t-bold span[aria-hidden="true"]')
+                .map((i, el) => $(el).text().trim())
+                .get();
+            skills = Array.from(new Set(skills.filter((s) => s)));
         }
         catch (e) {
-            console.warn('Failed to parse skills section', e);
+            console.warn("Failed to parse skills section", e);
         }
         const getFirstLast = (full) => {
-            const parts = full.split(' ').filter(p => p);
+            const parts = full.split(" ").filter((p) => p);
             return {
-                firstName: parts[0] || '',
-                lastName: parts.slice(1).join(' ') || ''
+                firstName: parts[0] || "",
+                lastName: parts.slice(1).join(" ") || "",
             };
         };
         const { firstName, lastName } = getFirstLast(name);
         const workExperiences = [];
         try {
-            const expSection = $('section').filter((i, el) => $(el).find('#experience').length > 0);
-            expSection.find('> div ul > li').each((i, li) => {
+            const expSection = $("section").filter((i, el) => $(el).find("#experience").length > 0);
+            expSection.find("> div ul > li").each((i, li) => {
                 const $li = $(li);
-                const roleText = $li.find('div.hoverable-link-text span[aria-hidden="true"]').first().text().trim() ||
-                    $li.find('span.t-bold span[aria-hidden="true"]').first().text().trim();
-                const companyBlock = $li.find('span.t-14.t-normal').first().text().trim();
-                const [companyNameRaw, workTypeRaw] = companyBlock.split(' · ').map(s => s.trim());
-                const dateRange = $li.find('span.t-14.t-normal.t-black--light').first().text().trim();
-                const locationText = $li.find('span.t-14.t-normal.t-black--light').eq(1).text().trim();
-                const description = $li.find('.inline-show-more-text--is-collapsed').text().trim();
+                const roleText = $li
+                    .find('div.hoverable-link-text span[aria-hidden="true"]')
+                    .first()
+                    .text()
+                    .trim() ||
+                    $li
+                        .find('span.t-bold span[aria-hidden="true"]')
+                        .first()
+                        .text()
+                        .trim();
+                const companyBlock = $li
+                    .find("span.t-14.t-normal")
+                    .first()
+                    .text()
+                    .trim();
+                const [companyNameRaw, workTypeRaw] = companyBlock
+                    .split(" · ")
+                    .map((s) => s.trim());
+                const dateRange = $li
+                    .find("span.t-14.t-normal.t-black--light")
+                    .first()
+                    .text()
+                    .trim();
+                const locationText = $li
+                    .find("span.t-14.t-normal.t-black--light")
+                    .eq(1)
+                    .text()
+                    .trim();
+                const description = $li
+                    .find(".inline-show-more-text--is-collapsed")
+                    .text()
+                    .trim();
                 const stillWorking = /present/i.test(dateRange);
                 if (!roleText)
                     return;
                 workExperiences.push({
                     jobTitle: roleText,
-                    companyName: companyNameRaw || '',
-                    startDate: '',
-                    endDate: '',
+                    companyName: companyNameRaw || "",
+                    startDate: "",
+                    endDate: "",
                     skills: [],
                     stillWorking,
                     description,
                     location: locationText || location,
-                    workType: workTypeRaw || ''
+                    workType: workTypeRaw || "",
                 });
             });
             const uniqueMap = new Map();
-            workExperiences.forEach(w => {
+            workExperiences.forEach((w) => {
                 const key = `${w.jobTitle}|${w.companyName}`;
                 if (!uniqueMap.has(key))
                     uniqueMap.set(key, w);
@@ -250,65 +312,84 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
             workExperiences.push(...Array.from(uniqueMap.values()));
         }
         catch (e) {
-            console.warn('Failed to parse experience section', e);
+            console.warn("Failed to parse experience section", e);
         }
         const educationExperiences = [];
         try {
-            const eduSection = $('section').filter((i, el) => $(el).find('#education').length > 0);
-            eduSection.find('> div ul > li').each((i, li) => {
+            const eduSection = $("section").filter((i, el) => $(el).find("#education").length > 0);
+            eduSection.find("> div ul > li").each((i, li) => {
                 const $li = $(li);
-                const collegeName = $li.find('div.hoverable-link-text span[aria-hidden="true"]').first().text().trim();
+                const collegeName = $li
+                    .find('div.hoverable-link-text span[aria-hidden="true"]')
+                    .first()
+                    .text()
+                    .trim();
                 if (!collegeName)
                     return;
-                const degreeLine = $li.find('span.t-14.t-normal').first().text().trim();
-                const [degreeRaw, fieldRaw] = degreeLine.split(',').map(s => s.trim());
-                const dateRange = $li.find('span.t-14.t-normal.t-black--light').first().text().trim();
+                const degreeLine = $li
+                    .find("span.t-14.t-normal")
+                    .first()
+                    .text()
+                    .trim();
+                const [degreeRaw, fieldRaw] = degreeLine
+                    .split(",")
+                    .map((s) => s.trim());
+                const dateRange = $li
+                    .find("span.t-14.t-normal.t-black--light")
+                    .first()
+                    .text()
+                    .trim();
                 const { start: eduStart, end: eduEnd } = extractDates(dateRange);
                 const startRaw = eduStart;
                 const endRaw = eduEnd;
                 const stillStudying = /present/i.test(dateRange);
                 educationExperiences.push({
-                    courseName: degreeRaw || '',
-                    field: fieldRaw || '',
+                    courseName: degreeRaw || "",
+                    field: fieldRaw || "",
                     collegeName,
-                    startDate: startRaw || '',
-                    endDate: endRaw || '',
+                    startDate: startRaw || "",
+                    endDate: endRaw || "",
                     skills: [],
                     stillStudying,
                     description: degreeLine,
-                    grade: '',
-                    location: location || '',
-                    educationType: degreeRaw || ''
+                    grade: "",
+                    location: location || "",
+                    educationType: degreeRaw || "",
                 });
             });
         }
         catch (e) {
-            console.warn('Failed to parse education section', e);
+            console.warn("Failed to parse education section", e);
         }
         const profileData = {
             fullName: name,
             firstName,
             lastName,
-            source: 'LinkedIn',
-            city: (location ? location.split(',')[0] : '').trim(),
-            state: (location && location.includes(',') ? location.split(',')[1] : '').trim(),
+            source: "LinkedIn",
+            city: (location ? location.split(",")[0] : "").trim(),
+            state: (location && location.includes(",")
+                ? location.split(",")[1]
+                : "").trim(),
             gender: genderDetected,
             country: countryDetected,
             linkedinUrl: profileUrl,
-            workedPreviously: workExperiences.length > 0 ? 'yes' : 'no',
-            degree: (((_a = educationExperiences[0]) === null || _a === void 0 ? void 0 : _a.courseName) || ((_b = educationExperiences[0]) === null || _b === void 0 ? void 0 : _b.educationType) || ((_c = educationExperiences[0]) === null || _c === void 0 ? void 0 : _c.field) || ''),
+            workedPreviously: workExperiences.length > 0 ? "yes" : "no",
+            degree: ((_a = educationExperiences[0]) === null || _a === void 0 ? void 0 : _a.courseName) ||
+                ((_b = educationExperiences[0]) === null || _b === void 0 ? void 0 : _b.educationType) ||
+                ((_c = educationExperiences[0]) === null || _c === void 0 ? void 0 : _c.field) ||
+                "",
             workExperiences,
             projectExperiences,
             educationExperiences,
-            scrapedAt: new Date().toISOString()
+            scrapedAt: new Date().toISOString(),
         };
-        const dataFile = 'scrappedData.json';
+        const dataFile = "scrappedData.json";
         try {
             fs_1.default.writeFileSync(dataFile, JSON.stringify(profileData, null, 2));
             console.log(`Scraped data saved to ${dataFile}`);
         }
         catch (writeErr) {
-            console.error('Failed to write scraped data to file:', writeErr);
+            console.error("Failed to write scraped data to file:", writeErr);
         }
         console.log("Scraping completed. Sending response...");
         const responsePayload = Object.assign(Object.assign({}, profileData), { message: "Profile scraped and saved successfully", savedTo: dataFile });
