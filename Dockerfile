@@ -13,7 +13,7 @@ RUN npm ci
 # Copy source code
 COPY . .
 
-# Build TypeScript
+# Build TypeScript (outputs to dist/)
 RUN npm run build
 
 # Production stage
@@ -29,18 +29,15 @@ RUN apt-get update \
       --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy package files
+# Copy package files and install only prod deps
 COPY package*.json ./
-
-# Install only production dependencies
 RUN npm ci --only=production && npm cache clean --force
 
-# Copy built application from builder stage
-COPY --from=builder /app/*.js ./
-COPY --from=builder /app/linkedinLogin.js ./
+# Copy compiled app
+COPY --from=builder /app/dist ./dist
+COPY --from=builder /app/linkedinLogin.js ./ 
 
 # Create non-root user
 RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
@@ -48,15 +45,11 @@ RUN groupadd -r pptruser && useradd -r -g pptruser -G audio,video pptruser \
     && chown -R pptruser:pptruser /home/pptruser \
     && chown -R pptruser:pptruser /app
 
-# Set environment variables
+# Environment variables
 ENV PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 ENV NODE_ENV=production
 
-# Switch to non-root user
 USER pptruser
 
-# Expose port
-EXPOSE 3000
-
-# Start the application
+# Start the app
 CMD ["npm", "start"]

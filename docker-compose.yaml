@@ -1,0 +1,12 @@
+version: "3.9"
+
+services:
+  scraping-api:
+    build: .
+    container_name: scraping-api
+    ports:
+      - "8080:8080" 
+    environment:
+      - PORT=8080
+      - LINKEDIN_EMAIL=${LINKEDIN_EMAIL}
+      - LINKEDIN_PASSWORD=${LINKEDIN_PASSWORD}

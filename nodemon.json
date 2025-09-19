@@ -1,0 +1,18 @@
+{
+  "ignore": [
+    "*.json",
+    "*.log",
+    "*.png",
+    "*.jpg",
+    "*.jpeg",
+    "scrappedData.json",
+    "linked_cookies.json",
+    "login_error.png",
+    "node_modules/**"
+  ],
+  "ext": "ts,js",
+  "watch": [
+    "server.ts",
+    "linkedinLogin.ts"
+  ]
+}

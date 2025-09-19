@@ -1,11 +1,10 @@
 import express, { Request, Response } from "express";
 import puppeteer from "puppeteer-extra";
-import { Browser, Page, Protocol, CookieParam } from "puppeteer";
-import cors from "cors";
+import { Browser, Page, Protocol } from "puppeteer";
+import cors, { CorsOptions } from "cors";
 import * as cheerio from "cheerio";
 import "dotenv/config";
 import fs from "fs";
-import { loginAndGetSessionCookie } from "./linkedinLogin";
 import StealthPlugin from "puppeteer-extra-plugin-stealth";
 
 interface ScrapeRequestBody {
@@ -31,10 +30,15 @@ interface LinkedInProfile {
 }
 
 const app = express();
-const PORT: number = Number(process.env.PORT);
+const PORT: number = Number(process.env.PORT) || 3000;
 
 app.use(express.json());
-app.use(cors());
+const corsOptions: CorsOptions = {
+  origin: true,
+  credentials: true
+};
+
+app.use(cors(corsOptions));
 
 // Health check endpoint for Render
 app.get('/health', (req, res) => {
@@ -48,47 +52,119 @@ app.get('/', (req, res) => {
 puppeteer.use(StealthPlugin());
 
 /**
- * Loads cookies from a JSON file or logs in to generate them,
- * then sets them on the Puppeteer page instance.
- * @param page - The Puppeteer page to set cookies on.
+ * Logs in to LinkedIn using the current browser page and saves cookies
+ * @param page - The current Puppeteer page to use for login
+ */
+async function loginWithCurrentPage(page: Page): Promise<void> {
+  console.log("Attempting to log into LinkedIn using current browser...");
+  
+  // Set user agent before login
+  await page.setUserAgent(
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36"
+  );
+
+  const email = process.env.LINKEDIN_EMAIL;
+  const password = process.env.LINKEDIN_PASSWORD;
+
+  if (!email || !password) {
+    throw new Error(
+      "LinkedIn credentials are missing. Please set LINKEDIN_EMAIL and LINKEDIN_PASSWORD environment variables."
+    );
+  }
+
+  console.log("Navigating to LinkedIn login page...");
+  await page.goto("https://www.linkedin.com/login", {
+    waitUntil: "networkidle2",
+    timeout: 120000
+  });
+
+  console.log("Typing credentials...");
+  await page.type("#username", email, { delay: 100 });
+  await page.type("#password", password, { delay: 100 });
+
+  console.log("Submitting login form...");
+  await page.click("button[type=submit]");
+
+  // Wait for the session cookie to be set
+  let liAtCookie: Protocol.Network.Cookie | undefined;
+  console.log("Waiting for 'li_at' session cookie...");
+  
+  for (let i = 0; i < 60; i++) {
+    const cookies = await page.cookies();
+    liAtCookie = cookies.find((cookie) => cookie.name === "li_at") as Protocol.Network.Cookie;
+    if (liAtCookie) {
+      console.log("✅ 'li_at' cookie found!");
+      break;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1000));
+  }
+
+  if (!liAtCookie) {
+    await page.screenshot({ path: 'login_error.png' });
+    throw new Error("'li_at' cookie not found after 60 seconds. Login may have failed. Check login_error.png.");
+  }
+
+  const sessionCookies: Protocol.Network.Cookie[] = [liAtCookie];
+  
+  // Save cookies to file for future use
+  fs.writeFileSync("linked_cookies.json", JSON.stringify(sessionCookies, null, 2));
+  console.log("Cookies saved to linked_cookies.json");
+}
+
+/**
+ * Loads cookies from environment, file, or performs login using current page
+ * @param page - The Puppeteer page to set cookies on
  */
 async function loadCookies(page: Page): Promise<void> {
-  let cookies: Protocol.Network.Cookie[];
-
-  if (!fs.existsSync("linked_cookies.json")) {
-    console.log("Cookies file not found, attempting to generate new cookies...");
-    try {
-      const fetchedCookies = await loginAndGetSessionCookie();
-      if (!fetchedCookies) {
-        throw new Error("Failed to log in and get cookies.");
-      }
-      cookies = fetchedCookies;
-      fs.writeFileSync("linked_cookies.json", JSON.stringify(cookies, null, 2));
-      console.log("New cookies generated and saved successfully.");
-    } catch (loginError: any) {
-      console.error("Cookie generation failed:", loginError.message);
-      throw new Error(`Authentication failed: ${loginError.message}`);
-    }
-  } else {
-    console.log("Loading existing cookies...");
-    const cookiesJson = fs.readFileSync("linked_cookies.json", "utf-8");
-    cookies = JSON.parse(cookiesJson);
-    console.log(`Loaded ${cookies.length} cookies from file.`);
+  // 1. Try environment variable first
+  const envCookie = process.env.LI_AT_COOKIE;
+  if (envCookie) {
+    console.log('Using li_at cookie from environment variable');
+    await page.setCookie({
+      name: 'li_at',
+      value: envCookie,
+      domain: '.linkedin.com',
+      path: '/',
+      httpOnly: true,
+      secure: true,
+      sameSite: 'None'
+    });
+    return;
   }
-  const puppeteerCookies = cookies.map((cookie) => ({
-    name: cookie.name,
-    value: cookie.value,
-    domain: cookie.domain || ".linkedin.com",
-    path: cookie.path || "/",
-    expires: cookie.expires,
-    httpOnly: cookie.httpOnly,
-    secure: cookie.secure,
-    sameSite: cookie.sameSite as "Strict" | "Lax" | "None" | undefined,
-  }));
 
-  console.log("Setting cookies in browser...");
-  await page.setCookie(...puppeteerCookies);
-  console.log("Cookies loaded and set successfully.");
+  // 2. Try loading from file
+  if (fs.existsSync("linked_cookies.json")) {
+    console.log("Loading existing cookies from file...");
+    const cookiesJson = fs.readFileSync("linked_cookies.json", "utf-8");
+    const cookies: Protocol.Network.Cookie[] = JSON.parse(cookiesJson);
+    console.log(`Loaded ${cookies.length} cookies from file.`);
+    
+    const puppeteerCookies = cookies.map((cookie) => ({
+      name: cookie.name,
+      value: cookie.value,
+      domain: cookie.domain || ".linkedin.com",
+      path: cookie.path || "/",
+      expires: cookie.expires,
+      httpOnly: cookie.httpOnly,
+      secure: cookie.secure,
+      sameSite: cookie.sameSite as "Strict" | "Lax" | "None" | undefined,
+    }));
+
+    console.log("Setting cookies in browser...");
+    await page.setCookie(...puppeteerCookies);
+    console.log("Cookies loaded and set successfully.");
+    return;
+  }
+
+  // 3. No cookies found - perform login with current page
+  console.log("No cookies found, performing login with current browser...");
+  try {
+    await loginWithCurrentPage(page);
+    console.log("Login successful, cookies saved. Ready to continue scraping.");
+  } catch (loginError: any) {
+    console.error("Login failed:", loginError.message);
+    throw new Error(`Authentication failed: ${loginError.message}`);
+  }
 }
 
 // endpoint that will scrape the profile using linkedin profile url
@@ -116,12 +192,19 @@ app.post(
       console.log("Launching Puppeteer...");
       browser = await puppeteer.launch({
         headless: true,
-        executablePath: puppeteer.executablePath(),
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer.executablePath(),
         args: [
           "--no-sandbox",
           "--disable-setuid-sandbox",
           "--disable-dev-shm-usage",
           "--disable-blink-features=AutomationControlled",
+          "--disable-extensions",
+          "--disable-gpu",
+          "--disable-background-timer-throttling",
+          "--disable-backgrounding-occluded-windows",
+          "--disable-renderer-backgrounding",
+          "--disable-features=TranslateUI",
+          "--disable-ipc-flooding-protection",
         ],
       });
 

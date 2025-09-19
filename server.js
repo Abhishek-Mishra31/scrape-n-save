@@ -51,52 +51,137 @@ const cors_1 = __importDefault(require("cors"));
 const cheerio = __importStar(require("cheerio"));
 require("dotenv/config");
 const fs_1 = __importDefault(require("fs"));
-const linkedinLogin_1 = require("./linkedinLogin");
 const puppeteer_extra_plugin_stealth_1 = __importDefault(require("puppeteer-extra-plugin-stealth"));
 const app = (0, express_1.default)();
-const PORT = Number(process.env.PORT);
+const PORT = Number(process.env.PORT) || 3000;
 app.use(express_1.default.json());
-app.use((0, cors_1.default)());
+const corsOptions = {
+    origin: true,
+    credentials: true
+};
+app.use((0, cors_1.default)(corsOptions));
+// Health check endpoint for Render
+app.get('/health', (req, res) => {
+    res.status(200).json({ status: 'OK', timestamp: new Date().toISOString() });
+});
+// Root endpoint
+app.get('/', (req, res) => {
+    res.json({ message: 'LinkedIn Scraper API', status: 'running' });
+});
 puppeteer_extra_1.default.use((0, puppeteer_extra_plugin_stealth_1.default)());
 /**
- * Loads cookies from a JSON file or logs in to generate them,
- * then sets them on the Puppeteer page instance.
- * @param page - The Puppeteer page to set cookies on.
+ * Logs in to LinkedIn using the current browser page and saves cookies
+ * @param page - The current Puppeteer page to use for login
+ */
+function loginWithCurrentPage(page) {
+    return __awaiter(this, void 0, void 0, function* () {
+        console.log("Attempting to log into LinkedIn using current browser...");
+        // Set user agent before login
+        yield page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36");
+        const email = process.env.LINKEDIN_EMAIL;
+        const password = process.env.LINKEDIN_PASSWORD;
+        if (!email || !password) {
+            throw new Error("LinkedIn credentials are missing. Please set LINKEDIN_EMAIL and LINKEDIN_PASSWORD environment variables.");
+        }
+        console.log("Navigating to LinkedIn login page...");
+        yield page.goto("https://www.linkedin.com/login", {
+            waitUntil: "networkidle2",
+            timeout: 120000
+        });
+        console.log("Typing credentials...");
+        yield page.type("#username", email, { delay: 100 });
+        yield page.type("#password", password, { delay: 100 });
+        console.log("Submitting login form...");
+        yield page.click("button[type=submit]");
+        // Wait for the session cookie to be set
+        let liAtCookie;
+        console.log("Waiting for 'li_at' session cookie...");
+        for (let i = 0; i < 60; i++) {
+            const cookies = yield page.cookies();
+            liAtCookie = cookies.find((cookie) => cookie.name === "li_at");
+            if (liAtCookie) {
+                console.log("✅ 'li_at' cookie found!");
+                break;
+            }
+            yield new Promise((resolve) => setTimeout(resolve, 1000));
+        }
+        if (!liAtCookie) {
+            yield page.screenshot({ path: 'login_error.png' });
+            throw new Error("'li_at' cookie not found after 60 seconds. Login may have failed. Check login_error.png.");
+        }
+        const sessionCookies = [liAtCookie];
+        // Save cookies to file for future use
+        fs_1.default.writeFileSync("linked_cookies.json", JSON.stringify(sessionCookies, null, 2));
+        console.log("Cookies saved to linked_cookies.json");
+    });
+}
+/**
+ * Loads cookies from environment, file, or performs login using current page
+ * @param page - The Puppeteer page to set cookies on
  */
 function loadCookies(page) {
     return __awaiter(this, void 0, void 0, function* () {
-        let cookies;
-        if (!fs_1.default.existsSync("linked_cookies.json")) {
-            console.log("Cookies file not found, running login script...");
-            const fetchedCookies = yield (0, linkedinLogin_1.loginAndGetSessionCookie)();
-            if (!fetchedCookies) {
-                throw new Error("Failed to log in and get cookies.");
-            }
-            cookies = fetchedCookies;
-            fs_1.default.writeFileSync("linked_cookies.json", JSON.stringify(cookies, null, 2));
+        // 1. Try environment variable first
+        const envCookie = process.env.LI_AT_COOKIE;
+        if (envCookie) {
+            console.log('Using li_at cookie from environment variable');
+            yield page.setCookie({
+                name: 'li_at',
+                value: envCookie,
+                domain: '.linkedin.com',
+                path: '/',
+                httpOnly: true,
+                secure: true,
+                sameSite: 'None'
+            });
+            return;
         }
-        else {
+        // 2. Try loading from file
+        if (fs_1.default.existsSync("linked_cookies.json")) {
+            console.log("Loading existing cookies from file...");
             const cookiesJson = fs_1.default.readFileSync("linked_cookies.json", "utf-8");
-            cookies = JSON.parse(cookiesJson);
+            const cookies = JSON.parse(cookiesJson);
+            console.log(`Loaded ${cookies.length} cookies from file.`);
+            const puppeteerCookies = cookies.map((cookie) => ({
+                name: cookie.name,
+                value: cookie.value,
+                domain: cookie.domain || ".linkedin.com",
+                path: cookie.path || "/",
+                expires: cookie.expires,
+                httpOnly: cookie.httpOnly,
+                secure: cookie.secure,
+                sameSite: cookie.sameSite,
+            }));
+            console.log("Setting cookies in browser...");
+            yield page.setCookie(...puppeteerCookies);
+            console.log("Cookies loaded and set successfully.");
+            return;
         }
-        const puppeteerCookies = cookies.map((cookie) => ({
-            name: cookie.name,
-            value: cookie.value,
-            domain: cookie.domain || ".linkedin.com",
-            path: cookie.path || "/",
-            expires: cookie.expires,
-            httpOnly: cookie.httpOnly,
-            secure: cookie.secure,
-            sameSite: cookie.sameSite,
-        }));
-        console.log("Setting cookies in browser...");
-        yield page.setCookie(...puppeteerCookies);
-        console.log("Cookies loaded and set successfully.");
+        // 3. No cookies found - perform login with current page
+        console.log("No cookies found, performing login with current browser...");
+        try {
+            yield loginWithCurrentPage(page);
+            console.log("Login successful, cookies saved. Ready to continue scraping.");
+        }
+        catch (loginError) {
+            console.error("Login failed:", loginError.message);
+            throw new Error(`Authentication failed: ${loginError.message}`);
+        }
     });
 }
 // endpoint that will scrape the profile using linkedin profile url
 app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* () {
     var _a, _b, _c;
+    // Set a timeout for the entire scraping operation
+    const timeout = setTimeout(() => {
+        console.error('Scraping operation timed out after 5 minutes');
+        if (!res.headersSent) {
+            res.status(408).json({
+                error: 'Request timeout',
+                details: 'Scraping took too long and was terminated'
+            });
+        }
+    }, 300000); // 5 minutes
     const { profileUrl } = req.body;
     if (!profileUrl) {
         return res.status(400).json({ error: "Profile URL is required" });
@@ -106,12 +191,19 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         console.log("Launching Puppeteer...");
         browser = yield puppeteer_extra_1.default.launch({
             headless: true,
-            executablePath: puppeteer_extra_1.default.executablePath(),
+            executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || puppeteer_extra_1.default.executablePath(),
             args: [
                 "--no-sandbox",
                 "--disable-setuid-sandbox",
                 "--disable-dev-shm-usage",
                 "--disable-blink-features=AutomationControlled",
+                "--disable-extensions",
+                "--disable-gpu",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-features=TranslateUI",
+                "--disable-ipc-flooding-protection",
             ],
         });
         const page = yield browser.newPage();
@@ -393,9 +485,13 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         }
         console.log("Scraping completed. Sending response...");
         const responsePayload = Object.assign(Object.assign({}, profileData), { message: "Profile scraped and saved successfully", savedTo: dataFile });
-        res.json(responsePayload);
+        clearTimeout(timeout);
+        if (!res.headersSent) {
+            res.json(responsePayload);
+        }
     }
     catch (error) {
+        clearTimeout(timeout);
         console.error("Error scraping LinkedIn profile:", error);
         res.status(500).json({
             error: "Failed to scrape LinkedIn profile",
@@ -409,12 +505,8 @@ app.post("/scrape", (req, res) => __awaiter(void 0, void 0, void 0, function* ()
         }
     }
 }));
-(() => __awaiter(void 0, void 0, void 0, function* () {
-    if (!fs_1.default.existsSync("linked_cookies.json")) {
-        console.log("Cookies file not found, running login script on startup...");
-        yield (0, linkedinLogin_1.loginAndGetSessionCookie)();
-    }
-}))();
+// Remove automatic login on startup - handle it per request instead
+console.log("Server starting - cookies will be loaded per request if needed");
 app.listen(PORT, () => {
     console.log(`Server is running on http://localhost:${PORT}`);
 });

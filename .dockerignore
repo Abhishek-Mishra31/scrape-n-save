@@ -10,6 +10,5 @@ coverage
 *.md
 .DS_Store
 *.log
-linked_cookies.json
 scrappedData.json
 login_error.png
